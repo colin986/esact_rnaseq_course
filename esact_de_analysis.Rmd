@@ -1,0 +1,610 @@
+---
+title: 'Differential expression analysis with DESeq2'
+author: 'ESACT Course'
+date: "19/10/2023"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+    number_sections: yes
+  html_document:
+    df_print: paged
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Introduction
+
+This code enables the reproduction of the differential gene expression analysis described in: 
+
+Tzani *et al.* **Sub physiological temperature induces pervasive alternative splicing in Chinese hamster ovary cells**
+*Biotechnology and Bioengineering 2020* [https://doi.org/10.1002/bit.27365]( https://doi.org/10.1002/bit.27365)
+
+
+
+# Prepare for analysis
+
+## Load R packages
+
+Load R packages for the analysis
+
+```{r echo=TRUE, message=FALSE, warning=TRUE, include=TRUE}
+
+package_list <- c("tidyverse", "biomaRt","DESeq2","RColorBrewer",
+                  "pheatmap","WebGestaltR","openxlsx")
+
+lapply(package_list, require, character.only = TRUE)
+```
+
+## Make result directory
+
+Create a new directory to store the results
+
+```{r}
+results_path <- "./results"
+
+# Check if the folder exists, and if not, create it
+if (!file.exists(results_path)) {
+  # Use recursive = TRUE to create parent directories if needed
+  dir.create(results_path, recursive = TRUE) 
+  cat("Folder created:", results_path, "\n")
+} 
+```
+
+## Save heatmaps function
+
+We will use this custom R function to save heatmaps late in the tutorial
+
+```{r}
+save_pheatmap_png <- function(x, filename, width=1500, height=1500, res = 150) {
+  png(filename, width = width, height = height, res = res)
+  grid::grid.newpage()
+  grid::grid.draw(x$gtable)
+  dev.off()
+}
+
+```
+
+
+# Make a DESeq2 count object
+
+## Import sample information
+
+Import information from the *sample_info.txt* file. This file contains the data required relating the HTSeq gene level counts to the experimental condition i.e. temperature shifted, and non-temperature shifted
+
+```{r}
+experiment_info <- read_delim("sample_info.txt", 
+                          delim = "\t", escape_double = FALSE,
+                          trim_ws = TRUE)
+experiment_info
+```
+
+## Associating HTSeq counts with samples
+
+We now create a data frame containing the names of the HTSeq count files and associate those files with the experimental conditions.
+
+```{r}
+# get the names of the 8 count files
+count_file_names <- list.files("htseq_counts")
+count_file_names 
+```
+
+
+```{r}
+sample_info <- data.frame(
+  sampleName = experiment_info$sra_id,
+  fileName = count_file_names,
+  condition = as.factor(experiment_info$condition)
+)
+
+sample_info
+```
+
+
+## Make DESeq data object
+
+Use the **DESeqDataSetFromHTSeqCount** function to create a DESeqDataSet object for analysis. A DESeqDataSet is a specialized type of object in R, belonging to the RangedSummarizedExperiment class. It serves as a container for holding input data, intermediate computations, and the outcomes of a differential expression analysis. Within a DESeqDataSet, the "counts" matrix is a crucial component, and it is enforced to contain non-negative integer values, residing as the initial element in the assay list. Additionally, it's mandatory to provide a formula that defines the experimental design when creating a DESeqDataSet instance.
+
+```{r}
+DESeq_data <- DESeqDataSetFromHTSeqCount(
+  sampleTable = sample_info,
+  directory = "htseq_counts",
+  design = ~ condition
+)
+```
+
+## Filter genes with low counts
+
+Although it's not necessary to perform pre-filtering on genes with low counts before utilizing DESeq2 functions, there are two compelling reasons why this practice can be beneficial. Firstly, it helps reduce the memory footprint of the dds data object by eliminating rows with a minimal number of reads. Secondly, it enhances the speed of count modeling within DESeq2.
+
+
+In this step, we apply a filter to retain only rows that exhibit a minimum count of 100 across a minimal sample size, such as in this case, where there are 4 temperature shifted samples.
+
+```{r}
+smallestGroupSize <- 4
+keep <- rowSums(counts(DESeq_data) >= 100) >= smallestGroupSize
+DESeq_data <- DESeq_data[keep,]
+DESeq_data
+```
+
+# Data exploration
+
+Prior to differential expression it is important to determine if a global view of the data supports the original hypothesis of the experiment. In this case our hypothesis was that a reduction of cell culture temperature would result in a global change of the CHO cell transcriptome. In the next sections we perform two unsupervised (i.e. we assume no prior knowledge of the experiment) dimensionality reduction techniques called principal components analysis (PCA) and hierarchical clustering analysis (HCA) to examine global relationships in the transciptome of our sample set.
+
+## Count data transformation
+
+When determining differential expression, DESeq uses raw counts and uses discrete distributions (see below). However for for visualization or clustering – it is useful to work with transformed versions of the count data. In this tutorial we variance stabilizing transformation (VST) to remove the dependence of the variance on the mean, particularly the high variance of the logarithm of count data when the mean is low. 
+
+```{r}
+vsd <- vst(DESeq_data)
+```
+
+## PCA
+
+PCA is a dimensionality reduction technique used in data analyses to transform complex data into a new coordinate system, where the first principal component explains the largest variance in the data, followed by subsequent components capturing decreasing variances. It is often used for visualizing high-dimensional data such as gene expression data to study global patterns or to reduce noise in the dataset prior to further analyses.
+
+```{r}
+# here we use the plotPCA function provided with DESeq2
+pcaData <- plotPCA(vsd, 
+                   intgroup=c("condition"), 
+                   returnData=TRUE)
+
+# determine the % variance captured in the first two PCs
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+```
+
+### Scores plot
+
+We can then plot a scores plot of the first two principal components which illustrates that gene expression patterns of temperature shift and non-temperature shift cells are separable in the plot. Therefore these data support our original hypothesis. In addition we observe no outlying samples in the set (e.g. no temperaure shift cluster with non-shifted samples). It is therefore appropiate to conduct differential expression analysis to identify individual genes that are altered between the conditions.
+
+```{r}
+pcaData %>%
+ggplot(aes(PC1, PC2, color=condition)) +
+  geom_point(size=2) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  theme_bw() + 
+  theme(legend.position = "top")
+```
+
+### Save the plot
+
+We can now save the PCA plot in PNG format at 600dpi, suitable for publication in a peer-reviewed manuscript
+
+```{r}
+ggsave(paste0(results_path,"/pca_plot.png"), device = "png", 
+       dpi = 600, width = 4, height = 4)
+```
+
+
+## HCA
+
+Hierarchical cluster analysis is a data analysis technique that groups similar data points or objects into clusters based on their pairwise similarity or dissimilarity, creating a tree-like structure called a dendrogram. Here we perform bidirectional clustering of the samples and represent the similarity as a heatmap.
+
+### Calculate sample distances
+
+First we use the *dist* function to generate a distance matrix using euclidean distance between the 8 samples
+
+```{r}
+sampleDists <- dist(t(assay(vsd)))
+sampleDistMatrix <- as.matrix(sampleDists)
+```
+
+### Plot heatmap
+
+The distance matrix is plotted as heatmap using the pheatmap package and sample names are added to the rows and columns of the matrix.
+
+```{r}
+rownames(sampleDistMatrix) <- vsd$condition
+
+colnames(sampleDistMatrix) <- vsd$condition
+
+# create a matrix containing the colours for the heatmap
+colors <- colorRampPalette( rev(brewer.pal(9, "Greens")) )(255)
+
+sample_heatmap <- pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+sample_heatmap
+```
+
+### Save heatmap
+
+We can now save the heatmap plot in PNG format at 600dpi, suitable for publication in a peer-reviewed manuscript
+
+```{r}
+save_pheatmap_png(sample_heatmap, paste0(results_path,"/sample_heatmap.png"))
+```
+
+
+# Differential expression Analysis
+
+Upon completion of the global asseement of the transcriptomic data, a clear separation between the experimental conditions is observed as well as grouping of replicate samples we can proceed to identifying genes that different between the shifted and non-temperature shifted CHO cells.
+
+
+
+## Prepare for DE analysis
+
+A single wrapper function performs the following steps
+
+* estimation of size factors: estimateSizeFactors
+
+ * estimation of dispersion: estimateDispersions
+
+ * Negative Binomial GLM fitting and Wald statistics: nbinomWaldTest
+
+```{r}
+# calculate differential expression using the DESeq wrapper function
+DESeq_data <- DESeq(DESeq_data)
+```
+
+
+## Set the reference condition
+
+First, we ensure that the comparator phenotype is set - in this case 37C for normal physiological temperature.
+
+```{r}
+DESeq_data$condition <- relevel(DESeq_data$condition, "temp_37")
+```
+
+## Get DESeq results 
+
+The DESeq2 results function retrieves a result table generated from a DESeq analysis, providing essential information such as base means across samples, log2 fold changes, standard errors, test statistics, p-values, and adjusted p-values.
+
+```{r}
+# set differential expression criteria
+de_results <- results(DESeq_data, 
+                      lfcThreshold = 0, 
+                      independentFiltering = T)
+```
+
+## Summary of DE at selected tresholds
+
+We can now filter the de_results object for changes we consider significant. in this case an adjusted p-value < 0.05 is required along with a linear fold change of > 1.5 up or downregulated.
+
+The following code shows the number of genes significantly differentially expressed using these criteria.
+
+```{r}
+sum(de_results$padj < 0.05 & abs(de_results$log2FoldChange) >= log2(1.5),  
+    na.rm=TRUE)
+```
+
+
+## Volcano plot
+
+A volcano plot is a graph used in gene expression analysis to visualize genes that exhibit significant changes in expression levels between experimental conditions. It plots the fold change in expression (X-axis) against the statistical significance (usually represented as the negative logarithm of the p-value, Y-axis) for each gene.
+
+```{r}
+# Create a data frame with log2 fold changes and -log10(p-values)
+volcano_data <- as.data.frame(results(DESeq_data))
+volcano_data$log2FoldChange <- volcano_data$log2FoldChange  
+
+# Add a column for -log10(p-values)
+volcano_data$minus_log10_pvalue <- -log10(volcano_data$padj)
+
+# Create the volcano plot
+volcano_plot <- volcano_data %>% 
+  ggplot( aes(x = log2FoldChange, y = minus_log10_pvalue)) +
+    geom_point(aes(color = ifelse(
+      padj < 0.05 & abs(log2FoldChange) > log2(1.5), 
+      "Significant", "Not Significant")), 
+      size = 0.1) +
+  scale_color_manual(values = c("Significant" = "black", 
+                                  "Not Significant" = "grey")) +
+  theme_bw() +
+  geom_vline(xintercept = c(-log2(1.5), log2(1.5)),linetype = "dashed", 
+             color = "red", linewidth =0.2) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", 
+             color = "red", linewidth =0.2) +
+    labs(x = "Log2 Fold Change (TS/NTS)", y = "-log10(p-value)") +
+    theme(legend.position = "none")  # Remove legend +
+
+volcano_plot
+
+# save the plots
+ggsave(paste0(results_path,"/volvanco_plot.png"), device = "png", 
+       dpi = 600, width = 4, height = 4)
+```
+
+```{r}
+# retain significant results
+sig_de_results <- subset(
+  de_results,
+  abs(log2FoldChange) >= 0.5849625 & padj < 0.05
+)
+
+sig_de_results <- sig_de_results[
+  order(sig_de_results$log2FoldChange, decreasing = T),]
+
+sig_de_results
+```
+
+## Annotate with ENSEMBL biomart 
+
+The genes for our count data are currently denoted by Ensembl ID. To associate information about the gene we connect to ENSEMBL BioMart using the biomaRt package and retrieve the information for each significantly differentially expressed gene.
+
+```{r}
+ensembl = useMart("ENSEMBL_MART_ENSEMBL",dataset="cgpicr_gene_ensembl", 
+                  host = "https://nov2020.archive.ensembl.org")
+filters <- listFilters(ensembl)
+attributes <- listAttributes(ensembl)
+
+biomart.out <- getBM(
+  attributes = c(
+    "ensembl_gene_id", "external_gene_name", "description",
+    "gene_biotype"
+  ),
+  filters = c(
+    "ensembl_gene_id"
+  ),
+  values = rownames(sig_de_results),
+  mart = ensembl,
+  uniqueRows = TRUE
+)
+
+# add the retrieved information to the sig_de_results data.frame.
+
+sig_de_results <- as_tibble(data.frame(sig_de_results), 
+                            rownames = "ensembl_gene_id") %>%
+  left_join(biomart.out, 
+            by = "ensembl_gene_id") %>%
+  dplyr::select(ensembl_gene_id, 
+                external_gene_name, 
+                description, 
+                gene_biotype, 
+                everything())
+```
+
+## Known genes
+
+We can assess the success of the experiment by using prior knowledge of important genes in biological processes under study to provide some confidence in our analyses. In this case a reduction of cell culture temperatures has previously been to induce expression of two genes, **Rbm3** and **Cirbp**
+
+To reference their counts we must first find their ensembl IDs. These will be contained within the sig_de_results, and both are indeed upregulated upon temperature shift.
+
+```{r}
+sig_de_results %>%
+  filter(external_gene_name %in% c("Cirbp", "Rbm3"))
+```
+### Rbm3 plot
+
+Here we can plot the counts for Rbm3 and save the plot to our results folder
+
+```{r}
+rbm3_data <- plotCounts(DESeq_data, gene=c("ENSCGRG00015006811"), 
+                        intgroup="condition", transform = F, returnData = T)
+
+
+rbm3_averages <- aggregate(count ~ condition, rbm3_data, mean)
+
+rbm3_averages %>%
+  ggplot(aes(x=condition, y=count, fill = condition)) +
+  geom_bar(stat= "identity") +
+  theme_bw() +
+  xlab("") +
+  labs(title = "Rbm3 gene expression") +
+  theme(legend.position = "none")
+
+ggsave(paste0(results_path,"/rbm3_plot.png"), device = "png", 
+       dpi = 600, width = 4, height = 4)
+```
+
+### Cirbp plot
+
+We can also plot Cirbp and save the plot to results
+
+```{r}
+cirbp_data <- plotCounts(DESeq_data, gene=c("ENSCGRG00015005181"), 
+                         intgroup="condition", returnData = T)
+
+cirbp_averages <- aggregate(count ~ condition, cirbp_data, mean)
+
+cirbp_averages %>%
+  ggplot(aes(x=condition, y=count, fill = condition)) +
+  geom_bar(stat= "identity") +
+  theme_bw() +
+  xlab("") +
+  labs(title = "Cirpb gene expression") +
+  theme(legend.position = "none")
+
+
+ggsave(paste0(results_path,"/cirbp_plot.png"), device = "png", 
+       dpi = 600, width = 4, height = 4)
+```
+# Enrichment analysis 
+
+While it is trival to determine the expression of known genes in both conditions we often wish to find out new insights on the effect of altering the cells. In our case we have > 1,500 genes and going through the list one by one is tedious and time consuming. A technique called gene set enrichment analysis can be used to compare our list against groups of genes known to be involved in biological processes (in this case we will use predefined groups from the Gene Ontology). 
+
+Here, we ask the question - does our differentially expressed gene list overlap with any known biological process more than we would expect by chance?
+
+## Make a folder 
+
+
+
+```{r}
+enrichdir <- "./results/enrichment_analysis/"
+suppressMessages(if (file.exists(enrichdir)) {
+  unlink(enrichdir)
+})
+if (!dir.exists(enrichdir)) {
+  dir.create(enrichdir)
+}
+```
+
+## Gene symbol file
+
+Here, we create a simple text file containing the gene symbols of differentially expressed genes.
+
+```{r}
+write(sig_de_results$external_gene_name, 
+      file = paste(enrichdir, "de_genes.txt", sep = ""))
+```
+
+## Run the enrichment analysis
+
+Next we run the gene set enrichment analysis through the *WebGestaltR* package, which automatically detemines the overpresentaiton of genes in GO biological processes.
+
+```{r}
+enrich_result <- WebGestaltRBatch(
+  enrichMethod = "ORA",
+  organism = "mmusculus",
+  enrichDatabase = c("geneontology_Biological_Process_noRedundant"),
+  enrichDatabaseType = "genesymbol",
+  interestGeneFolder = enrichdir,
+  interestGeneType = "genesymbol",
+  referenceSet = "genome",
+  minNum = 10,
+  maxNum = 500,
+  sigMethod = "fdr",
+  fdrMethod = "BH",
+  fdrThr = 0.05,
+  topThr = 10,
+  reportNum = 20,
+  perNum = 1000,
+  projectName = "ts_de",
+  isOutput = TRUE,
+  outputDirectory = enrichdir,
+  dagColor = "continuous",
+  setCoverNum = 10,
+  networkConstructionMethod = NULL,
+  neighborNum = 10,
+  highlightType = "Seeds",
+  highlightSeedNum = 10,
+  nThreads = 4
+)
+
+```
+
+## Enrichment Analysis Results
+
+
+### Summary
+Show the most enriched biological processes
+
+```{r}
+head(enrich_result[[1]][2]$enrichResult[,-c(3,10,11)])
+```
+
+### Plot
+
+Make a plot of the most significantly enrichment categories
+
+```{r}
+enrich_result[[1]]$enrichResult[1:8, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
+mutate(FDR = case_when(FDR == 0 ~ 2.2e-16, TRUE ~ FDR)) %>%
+  mutate(new_description = str_wrap(description, width = 50)) %>%
+  mutate(new_order = fct_reorder(new_description, -enrichmentRatio)) %>%
+  ggplot(aes(y = enrichmentRatio, x =new_order, label=overlap, fill = new_order)) +
+  geom_bar(stat="identity", width = 0.75) +
+  geom_text(aes(label = overlap), vjust = 0.5,hjust = 1.1, colour = "white") +
+  #scale_fill_viridis() +
+  theme_bw() +
+  labs(x = "",
+       y = "enrichmentRatio", 
+       title = "GO Biological Process") +
+  scale_color_brewer(palette="BrBG") +
+  theme(strip.text.x = element_text(face = "bold"),
+        strip.background = element_blank(), 
+        legend.position = "none",
+        axis.text.x = element_text( size = 6),
+        axis.text.y = element_text( size = 9),
+        panel.spacing = unit(2, "lines")) +
+    scale_x_discrete(limits=rev) +
+  coord_flip()
+
+
+ggsave(paste0(results_path,"/enrichment_plot.png"), device = "png", 
+       dpi = 600, width = 7, height = 4)
+```
+
+## Exploring an enriched category
+
+Lets look at Cell Cycle phase transition and see the genes that are up and downregulated
+
+### Gene symbols
+
+Make a list of the overlapping gene symbols and extract the differential expression results
+
+```{r}
+cell_cycle <- enrich_result[[1]]$enrichResult[5, 11]
+cell_cycle_genes <- unlist(strsplit(cell_cycle, ";", fixed = TRUE))
+
+cell_cycle_df <- sig_de_results %>%
+filter(external_gene_name %in% cell_cycle_genes)
+```
+
+### Heatmap
+
+Now make a heatmap of the gene expression values in both the temperature shifted and non-shifted cells. Include the gene symbol for each gene and mark the sample group, save the plot in the results folder
+
+```{r fig.height=10, fig.width=5}
+phenotype <- data.frame(sample_info$condition)
+rownames(phenotype) <- sample_info$sampleName 
+colnames(phenotype) <- "Temperature"
+
+row_annotations <- data.frame(cell_cycle_df$external_gene_name)
+rownames(row_annotations) <- cell_cycle_df$ensembl_gene_id
+
+
+res_sig_cc <- assay(vsd[cell_cycle_df$ensembl_gene_id, ])
+
+heat_colors <- brewer.pal(6, "YlOrRd")
+
+# Run pheatmap
+cell_cycle_heatmap <- pheatmap(res_sig_cc,
+        color = heat_colors,
+        cluster_rows = T,
+        show_rownames = T,
+        scale = "row", 
+        labels_row = cell_cycle_df$external_gene_name,
+        annotation_col =phenotype
+        
+        )
+
+save_pheatmap_png(cell_cycle_heatmap, 
+                  paste0(results_path,"/cell_cycle_heatmap.png"))
+```
+
+## Save results to Excel
+
+Finally we will save our results to Excel 
+
+### DE genes
+```{r}
+fn <- paste(results_path,"/ts_differential_expression.xlsx",sep="")
+suppressMessages(if (file.exists(fn)) {file.remove(fn)})
+
+# save the results to Excel
+write.xlsx(sig_de_results,
+           file = fn,
+           sheetName = "DE genes", append = TRUE
+)
+
+print(paste("Differential Expression results saved to ", 
+            results_path,"/DESeq2_analysis.xlsx"))
+```
+
+
+### Enrichment Analysis
+```{r}
+fn <- paste(results_path,"/go_enrichment_analysis.xlsx",sep="")
+suppressMessages(if (file.exists(fn)) {file.remove(fn)})
+
+# save the results to Excel
+write.xlsx(enrich_result[[1]]$enrichResult[, c(1, 2, 4, 5, 7, 8, 9, 11)],
+           file = fn,
+           sheetName = "GO Biological Process", append = TRUE
+)
+
+print(paste("Enrichment Analysis Results saved to ", 
+            results_path,"/go_enrichment_analysis.xlsx"))
+```
+
