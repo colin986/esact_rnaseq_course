@@ -5,7 +5,7 @@
 ## Differential Gene Expression analysis
 
 ---
-This respository accompanys the 'omics course delivered as part of the Metabolic and Bioprocess Modelling for Animal Cells Course 2023 held in Girona, Spain from October 15th-19th.
+This respository accompanys the 'omics course delivered as part of the [Metabolic and Bioprocess Modelling for Animal Cells Course 2023] (https://esact.org/metabolic-and-bioprocess-modelling-for-animal-cells-course-2023-new/#:~:text=Oct%2015%2D19%2C%202023&text=This%20is%20an%20introductory%20course,Flux%20balance%20analysis) held in Girona, Spain from October 15th-19th.
 
 The code contained in this repository contains the Linux commands and R commands required to reproduction of the differential expression analysis of the RNA-seq data described in: 
 
@@ -53,13 +53,11 @@ wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/063/SRR10572663/*" -P data/en
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/064/SRR10572664/*" -P data/ena
 ```
 
-## 2. Preprocessing 
-
-### initial QC of reads
-
-FASTQC serves as an initial quality assessment tool for individual RNA-seq samples, while MULTIQC enhances the efficiency of data quality assessment by aggregating and visualizing results from multiple samples or datasets. Together, these tools play a crucial role in ensuring the reliability and accuracy of RNA-seq data analysis.
+## 2. Preprocessing
 
 ### Assessement of raw data
+FASTQC serves as an initial quality assessment tool for individual RNA-seq samples, while MULTIQC enhances the efficiency of data quality assessment by aggregating and visualizing results from multiple samples or datasets. Together, these tools play a crucial role in ensuring the reliability and accuracy of RNA-seq data analysis.
+
 
 ```bash
 fastqc -t 70 data/ena/* -o data/quality_test/before/
