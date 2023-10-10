@@ -2,9 +2,12 @@
 
 # ESACT Metabolic and Bioprocess Modelling for Animal Cells Course 2023
 
-## Introduction
+## Differential Gene Expression analysis
+
 ---
-This respository enables the reproduction of the differential expression analysis of the RNA-seq data described in: 
+This respository accompanys the 'omics course delivered as part of the Metabolic and Bioprocess Modelling for Animal Cells Course 2023 held in Girona, Spain from October 15th-19th.
+
+The code contained in this repository contains the Linux commands and R commands required to reproduction of the differential expression analysis of the RNA-seq data described in: 
 
 Tzani *et al.* **Sub physiological temperature induces pervasive alternative splicing in Chinese hamster ovary cells**
 *Biotechnology and Bioengineering 2020* [https://doi.org/10.1002/bit.27365]( https://doi.org/10.1002/bit.27365)
@@ -14,17 +17,29 @@ Tzani *et al.* **Sub physiological temperature induces pervasive alternative spl
 [European Nucleotide Archive](https://www.ebi.ac.uk/ena/browser/view/PRJNA593052)
 
 ### Dependancies
-All the programmes must be added to the PATH to run the workflow
-- [Python 2.7.12](https://www.python.org/download/releases/2.7/)
-- [trimmomatic 0.36](http://www.usadellab.org/cms/?page=trimmomatic) 
-- [cutadpat 1.18](https://cutadapt.readthedocs.io/en/stable/)
-- [STAR-2.7.11a](https://github.com/alexdobin/STAR)
 
-## RNASeq data preprocesssing
+- [FASTQC v0.12.1](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
+- [MultiQC v1.16](https://multiqc.info)
+- [Trimmomatic v0.39](http://www.usadellab.org/cms/?page=trimmomatic)
+- [Cutadpat v4.4](https://cutadapt.readthedocs.io/en/stable/)
+- [STAR v2.7.4a](https://github.com/alexdobin/STAR)
+- [HTSeq v2.0.3](https://htseq.readthedocs.io)
+
+### R packages 
+
+- [DESeq2 v1.34.0](https://bioconductor.org/packages/release/bioc/html/DESeq2.html)
+- [BiomaRt v2.50.3](https://bioconductor.org/packages/release/bioc/html/biomaRt.html)
+- [RColorBrewer v1.1-2](https://cran.r-project.org/web/packages/RColorBrewer/index.html)
+- [pheatmap v1.0.12](https://cran.r-project.org/web/packages/pheatmap/index.html)
+- [WebGestaltR v0.4.5](https://cran.r-project.org/web/packages/WebGestaltR/index.html)
+- [openxlsx v4.2.5](https://cran.r-project.org/web/packages/openxlsx/index.html)
+
+## 1.  Download the data from ENA
+
 ---
-### Download the data from ENA
-This is a simple way to dowload from ENA, for higher speed download use the Aspera client
-Total data download size: **~95G** 
+
+This is a straightforward way to dowload from ENA, for higher speed download use the Aspera client
+Total data download size: **~95G**
 
 ```bash
 mkdir -p data/ena
@@ -38,28 +53,20 @@ wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/063/SRR10572663/*" -P data/en
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/064/SRR10572664/*" -P data/ena
 ```
 
-### activate conda environment
-
-```bash
-conda activate esact_rnaseq
-```
+## 2. Preprocessing 
 
 ### initial QC of reads
 
 FASTQC serves as an initial quality assessment tool for individual RNA-seq samples, while MULTIQC enhances the efficiency of data quality assessment by aggregating and visualizing results from multiple samples or datasets. Together, these tools play a crucial role in ensuring the reliability and accuracy of RNA-seq data analysis.
 
-
-### Initial quality assesement 
+### Assessement of raw data
 
 ```bash
 fastqc -t 70 data/ena/* -o data/quality_test/before/
 multiqc data/quality_test/ --filename raw_data_qc
 ```
 
-
 ### Trim the Illumina adaptors
-
-
 
 ```bash
 mkdir data/trimmed
@@ -95,15 +102,14 @@ cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
 done
 ```
 
-### Final quality assesement 
+### Assessement of preprocessed data
 
 ```bash
 fastqc -t 70 data/preprocessed/* -o data/quality_test/after/
 multiqc data/quality_test/after --filename preprocessed_qc
 ```
 
-
-## Download CHO cell PICR reference genome
+## 3. Download CHO cell PICR reference genome
 
 In this tutorial we use the latest assembly of the Chinese hamster genome availiable through ENSEMBL. In addition, the corresponding GTF annotation file is downloaded
 
@@ -120,7 +126,7 @@ gunzip reference_genome/*
 ```
 
 
-## Create STAR genome index 
+## 4. Create index for STAR read alignment
 
 In this tutorial we use STAR to align our reads for each sample to the genome. First an index must be constructed using the FASTA and GTF files downloaded from ENSEMBL
 
@@ -139,24 +145,27 @@ STAR --runThreadN 70 \
      --sjdbGTFfile $GTF
 ```
 
-## Align reads to index
+## 5. Align reads to reference index
+
 ```bash
 mkdir -p data/mapped
 OUT_DIR=data/mapped
 IN_DIR=data/preprocessed/paired
 
 cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
+    
+    STAR --runThreadN 16 \
+        --readFilesIn $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz \
+        --genomeDir reference_genome/star_index \
+        --readFilesCommand gunzip -c \
+        --outFileNamePrefix $OUT_DIR/"$SAMPLE_ID" \
+        --outSAMtype BAM SortedByCoordinate \
+        --twopassMode Basic
 
-    STAR \
-    --runThreadN 16 \
-    --readFilesIn $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz \
-    --genomeDir reference_genome/star_index \
-    --readFilesCommand gunzip -c \
-    --outFileNamePrefix $OUT_DIR/"$SAMPLE_ID" \
-    --outSAMtype BAM SortedByCoordinate \
-    --twopassMode Basic
 done
 ```
+
+## 6. Count reads aligning to annotated regions
 
 ```bash
 mkdir -p data/counts
@@ -166,14 +175,13 @@ IN_DIR=data/mapped
 GTF=reference_genome/Cricetulus_griseus_picr.CriGri-PICRH-1.0.110.gtf
 
 cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
-
     samtools index $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam
 
     htseq-count \
-    -r pos -f bam -i gene_id -s reverse \
-    $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam \
-    $GTF > \
-    "$OUT_DIR"/"$SAMPLE_ID".counts
+        -r pos -f bam -i gene_id -s reverse \
+        $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam \
+        $GTF > \
+        "$OUT_DIR"/"$SAMPLE_ID".counts
 
 done
 ```
