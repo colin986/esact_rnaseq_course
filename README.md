@@ -5,7 +5,7 @@
 ## Differential Gene Expression analysis
 
 ---
-This respository accompanys the 'omics course delivered as part of the [Metabolic and Bioprocess Modelling for Animal Cells Course 2023] (https://esact.org/metabolic-and-bioprocess-modelling-for-animal-cells-course-2023-new/#:~:text=Oct%2015%2D19%2C%202023&text=This%20is%20an%20introductory%20course,Flux%20balance%20analysis) held in Girona, Spain from October 15th-19th.
+This respository accompanys the 'omics course delivered as part of the [Metabolic and Bioprocess Modelling for Animal Cells Course 2023](https://esact.org/metabolic-and-bioprocess-modelling-for-animal-cells-course-2023-new/#:~:text=Oct%2015%2D19%2C%202023&text=This%20is%20an%20introductory%20course,Flux%20balance%20analysis) held in Girona, Spain from October 15th-19th.
 
 The code contained in this repository contains the Linux commands and R commands required to reproduction of the differential expression analysis of the RNA-seq data described in: 
 
