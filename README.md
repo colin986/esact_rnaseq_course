@@ -25,6 +25,7 @@ All the programmes must be added to the PATH to run the workflow
 ### Download the data from ENA
 This is a simple way to dowload from ENA, for higher speed download use the Aspera client
 Total data download size: **~95G** 
+
 ```bash
 mkdir -p data/ena
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/057/SRR10572657/*" -P data/ena 
@@ -36,14 +37,29 @@ wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/062/SRR10572662/*" -P data/en
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/063/SRR10572663/*" -P data/ena 
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/064/SRR10572664/*" -P data/ena
 ```
+
+### activate conda environment
+
 ```bash
 conda activate esact_rnaseq
 ```
+
+### initial QC of reads
+
+FASTQC serves as an initial quality assessment tool for individual RNA-seq samples, while MULTIQC enhances the efficiency of data quality assessment by aggregating and visualizing results from multiple samples or datasets. Together, these tools play a crucial role in ensuring the reliability and accuracy of RNA-seq data analysis.
+
+
+### Initial quality assesement 
 
 ```bash
 fastqc -t 70 data/ena/* -o data/quality_test/before/
 multiqc data/quality_test/ --filename raw_data_qc
 ```
+
+
+### Trim the Illumina adaptors
+
+
 
 ```bash
 mkdir data/trimmed
@@ -59,6 +75,8 @@ cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
     $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz
 done
 ```
+
+### Filter reads based on quality
 
 ```bash
 mkdir -p data/preprocessed/paired data/preprocessed/unpaired
@@ -77,6 +95,8 @@ cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
 done
 ```
 
+### Final quality assesement 
+
 ```bash
 fastqc -t 70 data/preprocessed/* -o data/quality_test/after/
 multiqc data/quality_test/after --filename preprocessed_qc
@@ -84,6 +104,8 @@ multiqc data/quality_test/after --filename preprocessed_qc
 
 
 ## Download CHO cell PICR reference genome
+
+In this tutorial we use the latest assembly of the Chinese hamster genome availiable through ENSEMBL. In addition, the corresponding GTF annotation file is downloaded
 
 ```bash
 mkdir reference_genome
@@ -99,6 +121,8 @@ gunzip reference_genome/*
 
 
 ## Create STAR genome index 
+
+In this tutorial we use STAR to align our reads for each sample to the genome. First an index must be constructed using the FASTA and GTF files downloaded from ENSEMBL
 
 ```bash
 mkdir reference_genome/star_index
@@ -133,6 +157,7 @@ cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
     --twopassMode Basic
 done
 ```
+
 ```bash
 mkdir -p data/counts
 OUT_DIR=data/counts
@@ -141,6 +166,14 @@ IN_DIR=data/mapped
 GTF=reference_genome/Cricetulus_griseus_picr.CriGri-PICRH-1.0.110.gtf
 
 cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
-htseq-count -r pos -f bam -i gene_id -s reverse $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam $REF_GTF > "$OUT_DIR"/"$SAMPLE_ID".counts
+
+    samtools index $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam
+
+    htseq-count \
+    -r pos -f bam -i gene_id -s reverse \
+    $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam \
+    $GTF > \
+    "$OUT_DIR"/"$SAMPLE_ID".counts
+
 done
 ```
