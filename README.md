@@ -74,6 +74,21 @@ cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
     -p $OUT_DIR/"$SAMPLE_ID"_2.fastq.gz \
     $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz
 done
+
+
+
+mkdir data/trim_galore
+IN_DIR=data/ena
+OUT_DIR=data/trim_galore
+
+cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
+    
+trim_galore --paired $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz \
+--illumina -o $OUT_DIR -q 30 \
+-j 8 --fastqc --fastqc_args "-o data/quality_test/after/"
+
+done 
+
 ```
 
 ### Filter reads based on quality
@@ -98,7 +113,7 @@ done
 ### Final quality assesement 
 
 ```bash
-fastqc -t 70 data/preprocessed/* -o data/quality_test/after/
+fastqc -t 70 data/preprocessed/paired/* -o data/quality_test/after/
 multiqc data/quality_test/after --filename preprocessed_qc
 ```
 
@@ -143,13 +158,13 @@ STAR --runThreadN 70 \
 ```bash
 mkdir -p data/mapped
 OUT_DIR=data/mapped
-IN_DIR=data/preprocessed/paired
+IN_DIR=data/trim_galore
 
 cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
 
     STAR \
     --runThreadN 16 \
-    --readFilesIn $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz \
+    --readFilesIn $IN_DIR/"$SAMPLE_ID"_1_val_1.fq.gz $IN_DIR/"$SAMPLE_ID"_2_val_2.fq.gz \
     --genomeDir reference_genome/star_index \
     --readFilesCommand gunzip -c \
     --outFileNamePrefix $OUT_DIR/"$SAMPLE_ID" \
