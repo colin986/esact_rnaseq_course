@@ -1,48 +1,43 @@
-[![DOI](https://zenodo.org/badge/225317346.svg)](https://zenodo.org/badge/latestdoi/225317346)
-
 # ESACT Metabolic and Bioprocess Modelling for Animal Cells Course 2023
 
-## Differential Gene Expression analysis
+## Introduction
 
 ---
-This respository accompanys the 'omics course delivered as part of the [Metabolic and Bioprocess Modelling for Animal Cells Course 2023](https://esact.org/metabolic-and-bioprocess-modelling-for-animal-cells-course-2023-new/#:~:text=Oct%2015%2D19%2C%202023&text=This%20is%20an%20introductory%20course,Flux%20balance%20analysis) held in Girona, Spain from October 15th-19th.
+This respository enables the reproduction of the differential expression analysis of the RNA-seq data described in: 
 
-The code contained in this repository contains the Linux commands and R commands required to reproduction of the differential expression analysis of the RNA-seq data described in: 
+Tzani *et al.* **Sub physiological temperature induces pervasive alternative splicing in Chinese hamster ovary cells** *Biotechnology and Bioengineering 2020* [https://doi.org/10.1002/bit.27365]( https://doi.org/10.1002/bit.27365)
 
-Tzani *et al.* **Sub physiological temperature induces pervasive alternative splicing in Chinese hamster ovary cells**
-*Biotechnology and Bioengineering 2020* [https://doi.org/10.1002/bit.27365]( https://doi.org/10.1002/bit.27365)
+## Preparation
 
-### Data availability:
-[NCBI Sequence Read Archive](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA593052/)  
-[European Nucleotide Archive](https://www.ebi.ac.uk/ena/browser/view/PRJNA593052)
+---
 
 ### Dependancies
 
-- [FASTQC v0.12.1](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
-- [MultiQC v1.16](https://multiqc.info)
-- [Trimmomatic v0.39](http://www.usadellab.org/cms/?page=trimmomatic)
-- [Cutadpat v4.4](https://cutadapt.readthedocs.io/en/stable/)
-- [STAR v2.7.4a](https://github.com/alexdobin/STAR)
-- [HTSeq v2.0.3](https://htseq.readthedocs.io)
+All the software must be in the PATH to run this workflow
 
-### R packages 
+- [FastQC v0.12.0](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
+- [multiqc v1.16](https://multiqc.info)
+- [TrimGalore](https://github.com/FelixKrueger/TrimGalore)
+- [STAR-2.7.11a](https://github.com/alexdobin/STAR)
+- [HTSeq v2.0.4](https://htseq.readthedocs.io/en/latest/)
 
-- [DESeq2 v1.34.0](https://bioconductor.org/packages/release/bioc/html/DESeq2.html)
-- [BiomaRt v2.50.3](https://bioconductor.org/packages/release/bioc/html/biomaRt.html)
-- [RColorBrewer v1.1-2](https://cran.r-project.org/web/packages/RColorBrewer/index.html)
-- [pheatmap v1.0.12](https://cran.r-project.org/web/packages/pheatmap/index.html)
-- [WebGestaltR v0.4.5](https://cran.r-project.org/web/packages/WebGestaltR/index.html)
-- [openxlsx v4.2.5](https://cran.r-project.org/web/packages/openxlsx/index.html)
+### Data availability
 
-## 1.  Download the data from ENA
+Information on the deposited data can be found here:
 
----
+[NCBI Sequence Read Archive](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA593052/)  
+[European Nucleotide Archive](https://www.ebi.ac.uk/ena/browser/view/PRJNA593052)
 
-This is a straightforward way to dowload from ENA, for higher speed download use the Aspera client
+### Download the data from ENA
+
+This is a straightforward way to dowload from ENA, for higher speed download use the Aspera client.
+
 Total data download size: **~95G**
 
 ```bash
+
 mkdir -p data/ena
+
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/057/SRR10572657/*" -P data/ena 
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/058/SRR10572658/*" -P data/ena
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/059/SRR10572659/*" -P data/ena 
@@ -53,63 +48,60 @@ wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/063/SRR10572663/*" -P data/en
 wget -q "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR105/064/SRR10572664/*" -P data/ena
 ```
 
-## 2. Preprocessing
+## RNASeq data preprocesssing
 
-### Assessement of raw data
+---
+
+### Initial QC of reads
+
 FASTQC serves as an initial quality assessment tool for individual RNA-seq samples, while MULTIQC enhances the efficiency of data quality assessment by aggregating and visualizing results from multiple samples or datasets. Together, these tools play a crucial role in ensuring the reliability and accuracy of RNA-seq data analysis.
 
-
 ```bash
-fastqc -t 70 data/ena/* -o data/quality_test/before/
+# sample by sample evaluation 
+fastqc data/ena/* -o data/quality_test/before/
+
+# aggregate the results
 multiqc data/quality_test/ --filename raw_data_qc
 ```
 
-### Trim the Illumina adaptors
+### Filter and trim reads
+
+The TrimGalore tool is used to remove any adapter sequences and trim low quality bases
 
 ```bash
-mkdir data/trimmed
+
+mkdir data/trim_galore
+
 IN_DIR=data/ena
-OUT_DIR=data/trimmed
+OUT_DIR=data/trim_galore
 
+# loop over samples
 cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
-    cutadapt  \
-    -A AGATCGGAAGAGCACACGTCTGAACTCCAGTCA \
-    -a AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTA \
-    -o $OUT_DIR/"$SAMPLE_ID"_1.fastq.gz \
-    -p $OUT_DIR/"$SAMPLE_ID"_2.fastq.gz \
-    $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz
-done
+    trim_galore --paired $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz \
+    --illumina -o $OUT_DIR -q 30 \
+    -j 8 --fastqc --fastqc_args "-o data/quality_test/after/"
+done 
 ```
 
-### Filter reads based on quality
+### Final quality assesement
+
+Compare the post-trimming quality of the data
 
 ```bash
-mkdir -p data/preprocessed/paired data/preprocessed/unpaired
-IN_DIR=data/trimmed
-OUT_DIR=data/preprocessed
+# sample by sample evaluation 
+fastqc data/preprocessed/paired/* -o data/quality_test/after/
 
-cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
-    trimmomatic PE \
-    -threads 70 \
-    $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz \
-    $OUT_DIR/paired/"$SAMPLE_ID"_1.fastq.gz $OUT_DIR/unpaired/"$SAMPLE_ID"_1.fastq.gz \
-    $OUT_DIR/paired/"$SAMPLE_ID"_2.fastq.gz $OUT_DIR/unpaired/"$SAMPLE_ID"_2.fastq.gz \
-    SLIDINGWINDOW:4:20 \
-    MINLEN:36 \
-    -trimlog $OUT_DIR/"$SAMPLE_ID".trimmomatic.log
-done
-```
-
-### Assessement of preprocessed data
-
-```bash
-fastqc -t 70 data/preprocessed/* -o data/quality_test/after/
+# aggregate the results 
 multiqc data/quality_test/after --filename preprocessed_qc
 ```
 
-## 3. Download CHO cell PICR reference genome
+## Mapping reads to reference genome
 
-In this tutorial we use the latest assembly of the Chinese hamster genome availiable through ENSEMBL. In addition, the corresponding GTF annotation file is downloaded
+In this tutorial we use the latest assembly of the Chinese hamster PICRH genome availiable through ENSEMBL. The corresponding GTF annotation file is downloaded. 
+
+---
+
+### Download CHO cell PICR reference genome
 
 ```bash
 mkdir reference_genome
@@ -123,10 +115,9 @@ wget $gtf_ftp/Cricetulus_griseus_picr.CriGri-PICRH-1.0.110.gtf.gz -P reference_g
 gunzip reference_genome/*
 ```
 
+### Create STAR genome index
 
-## 4. Create index for STAR read alignment
-
-In this tutorial we use STAR to align our reads for each sample to the genome. First an index must be constructed using the FASTA and GTF files downloaded from ENSEMBL
+In this tutorial, we will use the STAR to align our reads for each sample to the genome. First an index must be constructed using the FASTA and GTF files downloaded from ENSEMBL
 
 ```bash
 mkdir reference_genome/star_index
@@ -143,43 +134,71 @@ STAR --runThreadN 70 \
      --sjdbGTFfile $GTF
 ```
 
-## 5. Align reads to reference index
+### Alignment 
+
+Map the reads to the genome index
 
 ```bash
+
 mkdir -p data/mapped
+
 OUT_DIR=data/mapped
-IN_DIR=data/preprocessed/paired
+IN_DIR=data/trim_galore
 
+# loop over samples
 cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
-    
-    STAR --runThreadN 16 \
-        --readFilesIn $IN_DIR/"$SAMPLE_ID"_1.fastq.gz $IN_DIR/"$SAMPLE_ID"_2.fastq.gz \
-        --genomeDir reference_genome/star_index \
-        --readFilesCommand gunzip -c \
-        --outFileNamePrefix $OUT_DIR/"$SAMPLE_ID" \
-        --outSAMtype BAM SortedByCoordinate \
-        --twopassMode Basic
-
+    STAR \
+    --runThreadN 16 \
+    --readFilesIn $IN_DIR/"$SAMPLE_ID"_1_val_1.fq.gz $IN_DIR/"$SAMPLE_ID"_2_val_2.fq.gz \
+    --genomeDir reference_genome/star_index \
+    --readFilesCommand gunzip -c \
+    --outFileNamePrefix $OUT_DIR/"$SAMPLE_ID" \
+    --outSAMtype BAM SortedByCoordinate \
+    --twopassMode Basic
 done
 ```
 
-## 6. Count reads aligning to annotated regions
+### Mapping statistics
+
+MultiQC can also aggregate the mapping results
 
 ```bash
+multiqc data/mapping/*Log.final.out --filename mapping_stats
+```
+
+## Counting reads aligned to features
+
+---
+
+### HTSeq count
+
+```bash
+
 mkdir -p data/counts
+
 OUT_DIR=data/counts
 IN_DIR=data/mapped
 
 GTF=reference_genome/Cricetulus_griseus_picr.CriGri-PICRH-1.0.110.gtf
 
+# loop over samples
 cat sample_info.txt | cut -f 2 | tail -n 8 | while read SAMPLE_ID; do
+    # Index the bam file
     samtools index $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam
-
+    # count 
     htseq-count \
-        -r pos -f bam -i gene_id -s reverse \
-        $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam \
-        $GTF > \
-        "$OUT_DIR"/"$SAMPLE_ID".counts
+    -r pos -f bam -i gene_id -s reverse \
+    $IN_DIR/"$SAMPLE_ID"Aligned.sortedByCoord.out.bam \
+    $GTF > \
+    "$OUT_DIR"/"$SAMPLE_ID".counts
 
 done
+```
+
+### Count statistics
+
+Finally multiqc is used to evaluate the counting process
+
+```bash
+multiqc data/counts/* --filename count_stats
 ```
