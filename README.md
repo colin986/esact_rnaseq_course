@@ -1,4 +1,4 @@
-# ESACT Metabolic and Bioprocess Modelling for Animal Cells Course 2023
+# ESACT Metabolic and Bioprocess Modelling for Animal Cells Course 2024
 
 ## Introduction
 
